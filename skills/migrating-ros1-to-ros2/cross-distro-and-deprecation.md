@@ -49,6 +49,55 @@ If a package must build across multiple ROS2 distros (e.g. Humble + Jazzy + Roll
 ```
 Rationale from the commit message: the single-argument `get_package_share_directory` is deprecated starting ament_index_cpp 1.13 (Rolling) and its header is removed in 1.14; `get_package_share_path` (returns `std::filesystem::path`, same `PackageNotFoundError` behavior) is the replacement, but isn't available pre-1.13 (Humble/Jazzy) — so guard on `AMENT_INDEX_CPP_VERSION_GTE`, not on which distro you think you're on.
 
+## uint8[] message fields are rosidl::Buffer on Rolling, std::vector elsewhere
+
+Rolling changed the C++ type rosidl generates for a `uint8[]` field from
+`std::vector<uint8_t>` to `rosidl::Buffer<uint8_t>`. Anything that passed the field
+straight to an API expecting a `std::vector` stops compiling — on Rolling only:
+
+```
+error: no matching function for call to 'imdecode(const ...::Binary_<...>::_data_type&, cv::ImreadModes)'
+note: no known conversion for argument 1 from
+  'const rosidl::Buffer<unsigned char, std::allocator<unsigned char>>' to 'cv::InputArray'
+```
+
+Check the generated header rather than guessing which fields are affected — measured
+2026-08-18, **only `uint8[]` moved**:
+
+| Field | Jazzy | Rolling |
+|---|---|---|
+| `uint8[]` | `std::vector<uint8_t>` | **`rosidl::Buffer<uint8_t>`** |
+| `byte[]`, `int32[]`, `float64[]` | `std::vector<T>` | `std::vector<T>` |
+| `string[]`, nested `Msg[]` | `std::vector<T>` | `std::vector<T>` |
+
+```bash
+sed -n '/_<field>_type =/,+2p' /opt/ros/$ROS_DISTRO/include/<pkg>/<pkg>/msg/detail/<msg>__struct.hpp
+```
+
+`rosidl::Buffer` is contiguous, exposes `std::vector`'s own `iterator`/`const_iterator`
+types, and is assignable *from* a `std::vector` — so copying through a vector at the
+boundary compiles on every distro, with no `#if` and no `__has_include`:
+
+```cpp
+// reading a field into an API that wants std::vector
+std::vector<unsigned char> const buf(msg->data.begin(), msg->data.end());
+cv::Mat const image = cv::imdecode(buf, cv::IMREAD_UNCHANGED);
+
+// writing a field from an API that fills a std::vector&
+std::vector<unsigned char> out;
+tue::serialization::convert(archive, out);
+msg->data = std::move(out);
+```
+
+Do not reach for `const_cast` plus a `cv::Mat` view to dodge the copy: it buys one
+memcpy back and costs a `NOLINT` for `cppcoreguidelines-pro-type-const-cast`.
+
+The other fix worth considering is templating the API that only speaks
+`std::vector` — `tue::serialization::convert` is declared solely in those terms, which
+is why `ed` has to copy at all. That is the right change if you own the API; copying at
+the call site is the right change if you do not.
+(`ed`, commit `e4a69ba` — five call sites on `tue_serialization_interfaces/Binary.data`)
+
 ## Header .h → .hpp renames across distros
 
 Several ROS2 packages renamed public headers from `.h` to `.hpp` at different times across distros. If you need to support more than one distro, guard with `__has_include`, not a distro macro:

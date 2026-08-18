@@ -113,7 +113,12 @@ Same pattern recurs for `cv_bridge/cv_bridge.hpp`, `tf2_geometry_msgs/tf2_geomet
 
 For a QoS-type overload difference where `__has_include` doesn't apply (the header exists on both sides but the function signature differs), use SFINAE instead — see the `message_filters::Subscriber::subscribe()` example in [nodelets-and-launch.md](nodelets-and-launch.md).
 
-## Don't chase clang-tidy "modernize" suggestions past your oldest supported distro's compiler
+## Pick the standard from your oldest supported distro, then take everything it gives you
+
+The C++ standard a package can use is set by the **oldest distro still in its CI matrix**,
+not by preference. So this decision has two halves, and skipping either one is a mistake:
+
+**While an old distro is in the matrix, don't chase clang-tidy past its compiler.**
 
 ```cpp
 // Breaks on Humble/Jazzy's toolchain (attempted C++20)
@@ -128,6 +133,51 @@ Same for `std::cmp_greater_equal` (C++20, reverted to explicit cast + `NOLINT(mo
 (`geolib2`, commit `c587458`, from the commit message: "Previous changes attempted to use C++20 features that aren't available in older ROS distros. This fix reverts to C++11-compatible code and uses NOLINT comments to suppress clang-tidy modernization suggestions that can't be satisfied across all target distros.")
 
 If your shared lint config (e.g. `tue_lint_config`'s `.clang-tidy`, applied repo-wide) flags a modernization the oldest distro's compiler can't build, the fix is a deliberate revert + `NOLINT` annotation — not a conditional-compilation `#ifdef` per feature. Conditional compilation for individual C++ standard features gets unmaintainable fast; picking the lowest common standard and annotating the lint exception doesn't.
+
+**When that old distro leaves the matrix, raise the standard and revisit those NOLINTs.**
+The suppressions above were bought to satisfy a compiler that is no longer a target;
+leaving them is leaving the package on an older dialect for no reason. Dropping Humble
+left `ed` with Jazzy and rolling-u24, both Ubuntu 24.04 / GCC 13, so C++20 became free —
+matching `rgbd`, which was already on 20:
+
+```cmake
+if(NOT CMAKE_CXX_STANDARD)
+  set(CMAKE_CXX_STANDARD 20)
+endif()
+set(CMAKE_CXX_STANDARD_REQUIRED ON)   # easy to forget; without it CMake silently decays
+```
+
+Expect the bill to arrive as lint findings, not compile errors: raising `ed` to 20 turned on
+four checks that only fire in C++20 mode, 55 findings over 28 sites. That is the point —
+they were latent all along.
+
+| Check | Rewrite |
+|---|---|
+| `readability-container-contains` | `find(k) != end()` → `contains(k)` |
+| `modernize-use-ranges` | `std::sort(b, e)` → `std::ranges::sort(r)` |
+| `modernize-use-starts-ends-with` | `substr(0, n) == p` → `starts_with(p)` |
+| `modernize-use-std-numbers` | `3.14159...` → `std::numbers::pi`, `(1 + sqrt(5)) / 2` → `std::numbers::phi` |
+
+`clang-tidy --fix` handles most of it, but **review the diff** — on `ed` it got four things
+wrong or incomplete:
+
+- **`std::ranges::unique`'s fix-it does not compile.** It returns a *subrange*, so the
+  erase-the-tail idiom needs both of its ends:
+  ```cpp
+  std::ranges::sort(paths);
+  auto const duplicates = std::ranges::unique(paths);   // NOT erase(unique(paths), end())
+  paths.erase(duplicates.begin(), duplicates.end());
+  ```
+- `starts_with` makes hand-written length guards (`id.size() >= prefix.size() &&`)
+  redundant; the tool leaves them in place.
+- It inserts `<algorithm>` wherever it happens to land, including *inside* a
+  `#if __has_include(...)` branch, and will add a second copy if one already exists.
+- A local `constexpr double PI` that existed only because `M_PI` is not guaranteed by
+  `<cmath>` should be deleted, not redefined in terms of `std::numbers::pi`.
+
+Expect knock-on findings too: `contains()` is const-only where `end()` was not, so
+`misc-const-correctness` can suddenly see variables it previously could not.
+(`ed`, commit `d2782dc`)
 
 ## Deciding to deprecate instead of port
 

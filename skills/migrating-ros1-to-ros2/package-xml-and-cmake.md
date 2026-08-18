@@ -126,8 +126,9 @@ The smallest common case — a node with no exported library, no generated inter
 cmake_minimum_required(VERSION 3.8)
 project(beacon_monitor)
 if(NOT CMAKE_CXX_STANDARD)
-  set(CMAKE_CXX_STANDARD 17)
+  set(CMAKE_CXX_STANDARD 20)  # 17 if an older distro is still in the CI matrix
 endif()
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
@@ -186,8 +187,9 @@ cmake_minimum_required(VERSION 3.8)
 project(ed)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 if(NOT CMAKE_CXX_STANDARD)
-  set(CMAKE_CXX_STANDARD 17)
+  set(CMAKE_CXX_STANDARD 20)  # 17 if an older distro is still in the CI matrix
 endif()
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Werror=all -Wextra -Werror=extra)
 endif()

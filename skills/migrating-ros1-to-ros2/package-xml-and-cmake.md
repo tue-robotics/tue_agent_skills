@@ -223,10 +223,9 @@ target_link_libraries(${PROJECT_NAME}_core PUBLIC
   rgbd::rgbd rosconsole_bridge::rosconsole_bridge tue_config::tue_config
   tue_serialization::tue_serialization
   ${PCL_LIBRARIES}
-)
-# ament_target_dependencies still fine for deps consumed as a bundle
-ament_target_dependencies(${PROJECT_NAME}_core PUBLIC
-  diagnostic_updater pluginlib rclcpp tf2_ros
+  # Core ROS 2 deps go in the same call - never ament_target_dependencies (see below)
+  diagnostic_updater::diagnostic_updater pluginlib::pluginlib
+  rclcpp::rclcpp tf2_ros::tf2_ros
 )
 
 pluginlib_export_plugin_description_file(${PROJECT_NAME} plugins.xml)
@@ -279,6 +278,48 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS OFF)
 add_library(polypartition 3rdparty/polypartition/src/polypartition.cpp)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 ```
+
+### Never use ament_target_dependencies
+
+`ament_target_dependencies` **does not exist on Rolling** — `ament_cmake_target_dependencies`
+stopped shipping `ament_target_dependencies.cmake` there, so any CMakeLists using it fails to
+configure with `Unknown CMake command "ament_target_dependencies"`. It is still present on Humble
+and Jazzy, which is exactly why the mistake survives review: the package builds on the distro you
+tested and breaks on the one you didn't.
+
+Every ROS 2 dependency is reachable through `target_link_libraries` instead. Pick the first form
+that applies:
+
+| Dependency shape | Write this |
+|---|---|
+| Normal ament_cmake package (the common case) | `target_link_libraries(tgt PUBLIC pkg::pkg)` |
+| Interface package, all typesupports | `target_link_libraries(tgt PUBLIC ${pkg_TARGETS})` |
+| Interface package, one typesupport | `target_link_libraries(tgt PRIVATE pkg::pkg__rosidl_typesupport_cpp)` |
+| No exported targets at all (rare, legacy) | `target_link_libraries(tgt PUBLIC ${pkg_LIBRARIES})` plus `target_include_directories(tgt SYSTEM PUBLIC ${pkg_INCLUDE_DIRS})` |
+
+`pkg::pkg` covers far more than it looks like it should — verified on both Jazzy and Rolling for
+`diagnostic_updater`, `pluginlib`, `rclcpp`, `tf2`, `tf2_ros`, `tf2_geometry_msgs`, `kdl_parser`,
+`urdf`, and even the message packages `std_msgs` and `sensor_msgs`. Check an unfamiliar dependency
+before guessing:
+
+```cmake
+# drop into any CMakeLists, configure once, then delete
+find_package(somepkg REQUIRED)
+if(TARGET somepkg::somepkg)
+  message(STATUS "use somepkg::somepkg")
+endif()
+message(STATUS "somepkg_TARGETS = ${somepkg_TARGETS}")
+```
+
+Two behaviour changes to expect when you convert a call:
+
+- **Visibility becomes yours to choose.** `ament_target_dependencies` linked everything
+  `PUBLIC`/`INTERFACE`. `target_link_libraries` makes you say `PUBLIC` or `PRIVATE`, so a dependency
+  used only in a `.cpp` should become `PRIVATE` and stop leaking into your exported link interface.
+- **`ament_export_dependencies` is still required.** It is a separate mechanism and is not removed;
+  keep listing every dependency whose targets appear on your `PUBLIC`/`INTERFACE` interface, or
+  consumers fail at generate time with "the link interface of target `pkg::lib` contains
+  `Foo::foo` but the target was not found".
 
 ### Message-only package: rosidl_generate_interfaces
 
@@ -344,10 +385,10 @@ ament_export_dependencies(code_profiler_interfaces rclcpp std_msgs)
 Interfaces side is the minimal `rosidl_generate_interfaces` block from the previous section.
 (`code_profiler`, commits `89a08f6`, `e708730`, `55e5528`; same split shape in `tue_serialization`/`tue_serialization_interfaces`)
 
-### Minimal package + preferring exported targets over ament_target_dependencies
+### Minimal package, linked with namespaced targets
 
 ```cmake
-# First pass (a88d74f)
+# First pass (a88d74f) - DO NOT COPY, ament_target_dependencies is gone on Rolling
 find_package(ament_cmake)
 set(dependencies console_bridge_vendor console_bridge rcutils)
 foreach(dependency ${dependencies})
@@ -365,7 +406,10 @@ target_link_libraries(${PROJECT_NAME}
   PRIVATE rcutils::rcutils
 )
 ```
-(`rosconsole_bridge`) When a dependency ships modern CMake exported targets (`Foo::foo`), prefer `target_link_libraries` with explicit `PUBLIC`/`PRIVATE` over `ament_target_dependencies`, which always links everything as `PUBLIC`/`INTERFACE` regardless of actual usage.
+(`rosconsole_bridge`) The second form is the only one to write today: `target_link_libraries` with
+explicit `PUBLIC`/`PRIVATE`. It gets visibility right where `ament_target_dependencies` always
+linked everything `PUBLIC`/`INTERFACE`, and unlike `ament_target_dependencies` it exists on every
+distro. See "Never use ament_target_dependencies" above.
 
 ### gtest
 

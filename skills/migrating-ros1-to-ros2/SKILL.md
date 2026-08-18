@@ -54,6 +54,7 @@ digraph decide {
 | `add_message_files`/`add_service_files`/`generate_messages` | `rosidl_generate_interfaces(${PROJECT_NAME} "msg/X.msg" ... DEPENDENCIES ... ADD_LINTER_TESTS)` |
 | `catkin_package(...)` | `ament_export_targets(...)` + `ament_export_dependencies(...)` + `ament_package()` |
 | `catkin_add_gtest` | `ament_add_gtest` |
+| `ament_target_dependencies(tgt deps...)` | `target_link_libraries(tgt PUBLIC dep::dep ...)` — `ament_target_dependencies` does not exist on Rolling |
 | `catkin_lint_cmake` test_depend | `ament_cmake_lint_cmake` + `ament_cmake_xmllint` (+ org's `tue_lint_config`/`ament_lint` fork for clang-format/tidy) |
 | flat `time`/`duration` msg fields | `builtin_interfaces/Time` / `builtin_interfaces/Duration` |
 | `ROS_INFO`/`ROS_*_NAMED`/`ROS_*_STREAM` | `RCLCPP_INFO(node_->get_logger(), ...)` or `RCLCPP_INFO(rclcpp::get_logger("Name"), ...)` |
@@ -66,6 +67,6 @@ digraph decide {
 
 - **Guarding on `ROS_DISTRO` instead of the dependency's own version.** `ament_index_cpp::get_package_share_directory(pkg)` is deprecated in 1.13+ and header-removed in 1.14 — guard with `#if AMENT_INDEX_CPP_VERSION_GTE(1, 13, 0)`, not `#ifdef ROS2_DISTRO_JAZZY`. Distro version and dependency version don't always move together.
 - **Reaching for C++20 "modernize" fixes** (`std::ranges::any_of`, `std::cmp_greater_equal`, `set::contains`) because clang-tidy suggests them. If the package must build on the oldest supported distro's compiler, these break the build. Revert to C++11/17 and suppress with `// NOLINT(modernize-...)` instead.
-- **Using `ament_target_dependencies` for a dependency that ships modern exported CMake targets.** Prefer `target_link_libraries(tgt PUBLIC Foo::foo)` — it gets PUBLIC/PRIVATE visibility right, whereas `ament_target_dependencies` always links everything PUBLIC/INTERFACE.
+- **Using `ament_target_dependencies` at all.** It does not exist on Rolling (`Unknown CMake command "ament_target_dependencies"`), while Humble and Jazzy still have it — so the package builds on the distro you tested and breaks on the one you didn't. Link every ROS 2 dependency with `target_link_libraries(tgt PUBLIC dep::dep)`, which also forces you to get PUBLIC/PRIVATE visibility right; see the mapping table in [package-xml-and-cmake.md](package-xml-and-cmake.md#never-use-ament_target_dependencies).
 - **Literally translating every `.launch` idiom.** Conditional launch-prefix args (`gdb`), etc. don't always need round-tripping into `launch.conditions.IfCondition` — sometimes dropping unused ROS1 flexibility is the right call.
 - **Blocking `client.call(...)` translated to `rclcpp::spin_until_future_complete(node_, future)`.** If called from inside a plugin/library that doesn't own the node's main executor, this deadlocks. Give the caller its own callback group + private executor and call `spin_until_future_complete` on that.

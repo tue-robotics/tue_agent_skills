@@ -1,5 +1,33 @@
 # Cross-distro compatibility, and when to deprecate instead of port
 
+## Build-system commands get removed too, and there is no guard for it
+
+Version guards (below) cover C++ APIs. A CMake command that a newer distro deletes cannot be guarded
+the same way — there is no macro to test and no fallback worth writing. The only fix is to stop using
+it everywhere, including on the older distros that still have it.
+
+The live case: **`ament_target_dependencies` does not exist on Rolling.** Measured 2026-08-18 —
+`/opt/ros/jazzy/share/ament_cmake_target_dependencies/cmake/` contains
+`ament_target_dependencies.cmake`; the Rolling copy of that directory does not. A CMakeLists using
+it configures cleanly on Jazzy and fails on Rolling with:
+
+```
+CMake Error at CMakeLists.txt:8 (ament_target_dependencies):
+  Unknown CMake command "ament_target_dependencies".
+```
+
+Do not wrap it in `if(COMMAND ament_target_dependencies)` — that just hides the divergence and keeps
+two link paths alive. `target_link_libraries` with namespaced targets works on every distro, so
+convert unconditionally; see [package-xml-and-cmake.md](package-xml-and-cmake.md#never-use-ament_target_dependencies)
+for the per-dependency mapping.
+
+When you touch a CMakeLists during a migration, grep the whole repo rather than only the file you
+came for:
+
+```bash
+grep -rn "ament_target_dependencies" --include=CMakeLists.txt --include=*.cmake .
+```
+
 ## Guard on the dependency's own version, not on ROS_DISTRO
 
 If a package must build across multiple ROS2 distros (e.g. Humble + Jazzy + Rolling) at once, don't branch on the distro — branch on the specific dependency's own version macro. Distro version and a given library's version don't move in lockstep.

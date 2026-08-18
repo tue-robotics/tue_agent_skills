@@ -47,7 +47,23 @@ If a package must build across multiple ROS2 distros (e.g. Humble + Jazzy + Roll
     result = ament_index_cpp::get_package_share_directory(args[1]);
 #endif
 ```
-Rationale from the commit message: the single-argument `get_package_share_directory` is deprecated starting ament_index_cpp 1.13 (Rolling) and its header is removed in 1.14; `get_package_share_path` (returns `std::filesystem::path`, same `PackageNotFoundError` behavior) is the replacement, but isn't available pre-1.13 (Humble/Jazzy) — so guard on `AMENT_INDEX_CPP_VERSION_GTE`, not on which distro you think you're on.
+Rationale from the commit message: the single-argument `get_package_share_directory` is deprecated starting ament_index_cpp 1.13 (Rolling) and its header is removed in 1.14; `get_package_share_path` (returns `std::filesystem::path`, same `PackageNotFoundError` behavior) is the replacement.
+
+**Check whether you still need the guard before copying it.** That `#if` was written for
+Humble. Measured 2026-08-18: Jazzy ships ament_index_cpp **1.8.4** and Rolling **1.13.3**,
+and `get_package_share_path` is declared *identically* on both — same signature, same
+return type, same throws — so a Jazzy+Rolling package just calls it:
+
+```cpp
+#include <ament_index_cpp/get_package_share_path.hpp>
+std::string const pkg_path = ament_index_cpp::get_package_share_path(pkg).string();
+```
+
+The replacement being newer than the deprecation does not mean it is unavailable on the
+older distro; back-ported additions are common. Compile a one-line call on your oldest
+target under `-Werror=deprecated-declarations` before reaching for `#if`.
+(`ed`, commit `c941f92` — this was the last rolling CI failure, reported as
+`clang-diagnostic-deprecated-declarations`, which a zero-findings clang-tidy bar fails on.)
 
 ## uint8[] message fields are rosidl::Buffer on Rolling, std::vector elsewhere
 

@@ -1,5 +1,44 @@
 # Cross-distro compatibility, and when to deprecate instead of port
 
+## CI: test every supported distro
+
+Everything in this file only pays off if CI builds each distro the package claims to support.
+A migration PR that just sets the image to `ghcr.io/tue-robotics/tue-env-ros-jazzy` passes on
+Jazzy and leaves every Rolling-only break (`ament_target_dependencies`, `rosidl::Buffer`, removed
+headers) to be found by the next consumer. Use a matrix over the `tue-env-ros-<distro>` images:
+
+```yaml
+name: CI
+
+on: [push, pull_request, workflow_dispatch]
+
+permissions:
+  contents: read
+
+jobs:
+  tue-ci:
+    name: TUe CI - ${{ github.event_name }} (${{ matrix.ros_distro }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        ros_distro: [jazzy, rolling-u24]
+    steps:
+      - name: TUe CI
+        uses: tue-robotics/tue-env/ci/main@master
+        with:
+          image: ghcr.io/tue-robotics/tue-env-ros-${{ matrix.ros_distro }}
+          package: ${{ github.event.repository.name }}
+```
+(`ed`, `onnxruntime_ros`)
+
+- `fail-fast: false`, so a Rolling failure doesn't cancel the Jazzy job and hide whether the
+  break is distro-specific.
+- `[jazzy, rolling-u24]` is the org's matrix as of 2026-11 (Humble dropped). The oldest entry
+  sets the C++ standard, see below. Change the matrix and the standard together.
+- A package that changes behaviour when CUDA is found (`onnxruntime_ros`, `tensorrt_ros`) adds
+  the CUDA image as an extra entry: `[jazzy, jazzy-cu12.8.2-devel, rolling-u24]`.
+
 ## Build-system commands get removed too, and there is no guard for it
 
 Version guards (below) cover C++ APIs. A CMake command that a newer distro deletes cannot be guarded

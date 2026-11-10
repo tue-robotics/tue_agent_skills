@@ -15,7 +15,7 @@ skills/
 
 ## Using these skills
 
-Most agent CLIs load skills from a per-tool directory (e.g. `~/.claude/skills/` for Claude Code) and/or the cross-runtime alias `~/.agents/skills/` (Codex, Copilot CLI, Gemini CLI, and Claude Code all recognize the alias).
+Most agent CLIs load skills from a per-tool directory (e.g. `~/.claude/skills/` for Claude Code) and/or the cross-runtime alias `~/.agents/skills/` (read by Codex, Copilot CLI and Gemini CLI).
 
 Clone this repo once, then symlink the skills you want in:
 
@@ -24,7 +24,7 @@ git clone git@github.com:tue-robotics/tue_agent_skills.git ~/src/tue_agent_skill
 ./install.sh
 ```
 
-`install.sh` symlinks every skill under `skills/` into `~/.agents/skills/`, so `git pull` in this repo keeps every tool's skills up to date with no copying. To install into a tool-specific directory instead (or in addition), symlink individual skill folders directly, e.g.:
+`install.sh` symlinks every skill under `skills/` into both `~/.agents/skills/` and `~/.claude/skills/`, so `git pull` in this repo keeps every tool's skills up to date with no copying. Re-run it after a new skill is added, since each skill is its own link. To install only selected skills, or into another tool-specific directory, symlink individual skill folders directly, e.g.:
 
 ```bash
 ln -s ~/src/tue_agent_skills/skills/migrating-ros1-to-ros2 ~/.claude/skills/migrating-ros1-to-ros2
